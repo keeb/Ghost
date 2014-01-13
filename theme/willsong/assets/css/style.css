@@ -35,7 +35,8 @@ a{color:#505050;text-decoration:none}
 #main_willsong #thearticle_willsong .articledetails_willsong .date_willsong{margin-right:20px}
 #main_willsong #thearticle_willsong .postcontent_willsong a{text-decoration:underline}
 #main_willsong #thearticle_willsong .postcontent_willsong blockquote{border-left:5px solid #505050;padding:1px 0 1px 40px;margin:0}
-#main_willsong #thearticle_willsong .postcontent_willsong code,#main_willsong #thearticle_willsong .postcontent_willsong pre code{display:inline-block;background-color:#bebebe;border:1px solid #505050;border-radius:4px;color:#505050}
+#main_willsong #thearticle_willsong .postcontent_willsong pre code{display:inline-block;background-color:#bebebe;border:1px solid #505050;border-radius:4px;color:#505050}
+#main_willsong #thearticle_willsong .postcontent_willsong code{background-color:#bebebe;border:1px solid #505050;border-radius:4px;color:#505050}
 #main_willsong #thearticle_willsong .postcontent_willsong pre code{width:95%;padding:2%}
 #main_willsong #thearticle_willsong .postcontent_willsong input[type="text"]{border:1px solid #959595;border-radius:4px;padding:5px 10px;}
 #main_willsong #thearticle_willsong .postcontent_willsong input[type="text"]:focus{outline:none}
