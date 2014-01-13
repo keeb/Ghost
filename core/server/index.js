@@ -3,27 +3,32 @@
 // modules to ensure config gets right setting.
 
 // Module dependencies
-var config       = require('./config'),
-    express      = require('express'),
-    when         = require('when'),
-    _            = require('underscore'),
-    semver       = require('semver'),
-    fs           = require('fs'),
-    errors       = require('./errorHandling'),
-    plugins      = require('./plugins'),
-    path         = require('path'),
-    Polyglot     = require('node-polyglot'),
-    mailer       = require('./mail'),
-    Ghost        = require('../ghost'),
-    helpers      = require('./helpers'),
-    middleware   = require('./middleware'),
-    routes       = require('./routes'),
-    packageInfo  = require('../../package.json'),
+var crypto      = require('crypto'),
+    express     = require('express'),
+    hbs         = require('express-hbs'),
+    fs          = require('fs'),
+    uuid        = require('node-uuid'),
+    path        = require('path'),
+    Polyglot    = require('node-polyglot'),
+    semver      = require('semver'),
+    _           = require('underscore'),
+    when        = require('when'),
+
+    api         = require('./api'),
+    config      = require('./config'),
+    errors      = require('./errorHandling'),
+    helpers     = require('./helpers'),
+    mailer      = require('./mail'),
+    middleware  = require('./middleware'),
+    models      = require('./models'),
+    permissions = require('./permissions'),
+    plugins     = require('./plugins'),
+    routes      = require('./routes'),
+    packageInfo = require('../../package.json'),
+
 
 // Variables
-    ghost = new Ghost(),
-    setup,
-    init;
+    dbHash;
 
 // If we're in development mode, require "when/console/monitor"
 // for help in seeing swallowed promise errors, and log any
@@ -32,37 +37,99 @@ if (process.env.NODE_ENV === 'development') {
     require('when/monitor/console');
 }
 
+function doFirstRun() {
+    var firstRunMessage = [
+        'Welcome to Ghost.',
+        'You\'re running under the <strong>',
+        process.env.NODE_ENV,
+        '</strong>environment.',
+
+        'Your URL is set to',
+        '<strong>' + config().url + '</strong>.',
+        'See <a href="http://docs.ghost.org/">http://docs.ghost.org</a> for instructions.'
+    ];
+
+    return api.notifications.add({
+        type: 'info',
+        message: firstRunMessage.join(' '),
+        status: 'persistent',
+        id: 'ghost-first-run'
+    });
+}
+
+function initDbHashAndFirstRun() {
+    return when(api.settings.read('dbHash')).then(function (hash) {
+        // we already ran this, chill
+        // Holds the dbhash (mainly used for cookie secret)
+        dbHash = hash.value;
+
+        if (dbHash === null) {
+            var initHash = uuid.v4();
+            return when(api.settings.edit('dbHash', initHash)).then(function (settings) {
+                dbHash = settings.dbHash;
+                return dbHash;
+            }).then(doFirstRun);
+        }
+        return dbHash.value;
+    });
+}
+
 // Sets up the express server instance.
 // Instantiates the ghost singleton,
 // helpers, routes, middleware, and plugins.
 // Finally it starts the http server.
 function setup(server) {
 
+    // create a hash for cache busting assets
+    var assetHash = (crypto.createHash('md5').update(packageInfo.version + Date.now()).digest('hex')).substring(0, 10);
+
     // Set up Polygot instance on the require module
     Polyglot.instance = new Polyglot();
 
-    when(ghost.init()).then(function () {
+    // ### Initialisation
+
+    // Initialise the models
+    models.init().then(function () {
+        // Populate any missing default settings
+        return models.Settings.populateDefaults();
+    }).then(function () {
+        // Initialize the settings cache
+        return api.init();
+    }).then(function () {
+        // We must pass the api.settings object
+        // into this method due to circular dependencies.
+        return config.theme.update(api.settings, config().url);
+    }).then(function () {
         return when.join(
-            // Initialise mail after first run,
-            // passing in config module to prevent
-            // circular dependencies.
-            mailer.init(ghost, config),
-            helpers.loadCoreHelpers(ghost, config)
+            // Check for or initialise a dbHash.
+            initDbHashAndFirstRun(),
+            // Initialize the permissions actions and objects
+            permissions.init()
         );
     }).then(function () {
+        // Initialize mail
+        return mailer.init();
+    }).then(function () {
+        var adminHbs = hbs.create();
 
         // ##Configuration
-        // set the view engine
-        server.set('view engine', 'hbs');
-
-        // set the configured URL
-        server.set('ghost root', ghost.blogGlobals().path);
+        server.set('version hash', assetHash);
 
         // return the correct mime type for woff filess
         express['static'].mime.define({'application/font-woff': ['woff']});
 
+        // ## View engine
+        // set the view engine
+        server.set('view engine', 'hbs');
+
+        // Create a hbs instance for admin and init view engine
+        server.set('admin view engine', adminHbs.express3({partialsDir: config.paths().adminViews + 'partials'}));
+
+        // Load helpers
+        helpers.loadCoreHelpers(adminHbs, assetHash);
+
         // ## Middleware
-        middleware(server);
+        middleware(server, dbHash);
 
         // ## Routing
 
@@ -78,7 +145,7 @@ function setup(server) {
         // Are we using sockets? Custom socket or the default?
         function getSocket() {
             if (config().server.hasOwnProperty('socket')) {
-                return _.isString(config().server.socket) ? config().server.socket : path.join(__dirname, '../content/', process.env.NODE_ENV + '.socket');
+                return _.isString(config().server.socket) ? config().server.socket : path.join(config.path().contentPath, process.env.NODE_ENV + '.socket');
             }
             return false;
         }
@@ -92,7 +159,7 @@ function setup(server) {
                     packageInfo.engines.node.yellow,
                     "you are using version".red,
                     process.versions.node.yellow,
-                    "\nPlease go to http://nodejs.org to get the latest version".green
+                    "\nPlease go to http://nodejs.org to get a supported version".green
                 );
 
                 process.exit(0);
@@ -138,11 +205,8 @@ function setup(server) {
 
         }
 
-        // Expose the express server on the ghost instance.
-        ghost.server = server;
-
         // Initialize plugins then start the server
-        plugins.init(ghost).then(function () {
+        plugins.init().then(function () {
 
             // ## Start Ghost App
             if (getSocket()) {
@@ -153,7 +217,7 @@ function setup(server) {
                         getSocket(),
                         startGhost
                     );
-                    fs.chmod(getSocket(), '0744');
+                    fs.chmod(getSocket(), '0660');
                 });
 
             } else {

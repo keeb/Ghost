@@ -11,12 +11,23 @@
     Ghost.Views.Blog = Ghost.View.extend({
         initialize: function (options) {
             /*jslint unparam:true*/
+            var self = this,
+                finishProgress = function () {
+                    NProgress.done();
+                };
+
+            // Basic collection request/sync flow progress bar handlers
             this.listenTo(this.collection, 'request', function () {
                 NProgress.start();
             });
-            this.listenTo(this.collection, 'sync', function () {
-                NProgress.done();
+            this.listenTo(this.collection, 'sync', finishProgress);
+
+            // A special case because models that are destroyed are removed from the
+            // collection before the sync event fires and bubbles up
+            this.listenTo(this.collection, 'destroy', function (model) {
+                self.listenToOnce(model, 'sync', finishProgress);
             });
+
             this.addSubview(new PreviewContainer({ el: '.js-content-preview', collection: this.collection })).render();
             this.addSubview(new ContentList({ el: '.js-content-list', collection: this.collection })).render();
         }
@@ -94,8 +105,7 @@
                 data: {
                     status: 'all',
                     page: (self.collection.currentPage + 1),
-                    where: { page: 'all' },
-                    orderBy: ['updated_at', 'DESC']
+                    staticPages: 'all'
                 }
             }).then(function onSuccess(response) {
                 /*jslint unparam:true*/
@@ -138,7 +148,7 @@
 
         initialize: function () {
             this.listenTo(Backbone, 'blog:activeItem', this.checkActive);
-            this.listenTo(this.model, 'change:page', this.render);
+            this.listenTo(this.model, 'change:page change:featured', this.render);
             this.listenTo(this.model, 'destroy', this.removeItem);
         },
 
@@ -214,7 +224,7 @@
             e.preventDefault();
             // for now this will disable "open in new tab", but when we have a Router implemented
             // it can go back to being a normal link to '#/ghost/editor/X'
-            window.location = Ghost.paths.ghostRoot + '/ghost/editor/' + this.model.get('id') + '/';
+            window.location = Ghost.paths.subdir + '/ghost/editor/' + this.model.get('id') + '/';
         },
 
         toggleFeatured: function (e) {
@@ -256,7 +266,7 @@
                 $(e.currentTarget).attr('target', '_blank');
             });
 
-            if (this.model !== 'undefined') {
+            if (this.model !== undefined) {
                 this.addSubview(new Ghost.View.PostSettings({el: $('.post-controls'), model: this.model})).render();
             }
 

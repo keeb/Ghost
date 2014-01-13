@@ -1,3 +1,7 @@
+// # Gruntfile - Task automation for Ghost
+// Run various tasks when developing for and working with Ghost
+// Run `grunt --help` or visit https://github.com/TryGhost/Ghost/wiki/Grunt-Toolkit/ for usage instructions
+
 var path           = require('path'),
     when           = require('when'),
     semver         = require('semver'),
@@ -8,6 +12,9 @@ var path           = require('path'),
     distDirectory  = path.resolve(process.cwd(), '.dist'),
     config         = require('./core/server/config'),
 
+
+    // ## Build File Patterns
+    // a list of files and paterns to process and exclude when running builds & releases
     buildGlob = [
         '**',
         '!docs/**',
@@ -37,6 +44,8 @@ var path           = require('path'),
         '!*.html'
     ],
 
+    // ## Grunt configuration
+
     configureGrunt = function (grunt) {
 
         // load all grunt tasks
@@ -47,17 +56,14 @@ var path           = require('path'),
             paths: {
                 adminAssets: './core/client/assets',
                 build: buildDirectory,
-                nightlyBuild: path.join(buildDirectory, 'nightly'),
-                weeklyBuild: path.join(buildDirectory, 'weekly'),
                 releaseBuild: path.join(buildDirectory, 'release'),
                 dist: distDirectory,
-                nightlyDist: path.join(distDirectory, 'nightly'),
-                weeklyDist: path.join(distDirectory, 'weekly'),
                 releaseDist: path.join(distDirectory, 'release')
             },
             buildType: 'Build',
             pkg: grunt.file.readJSON('package.json'),
 
+            // ### Config for grunt-contrib-watch
             // Watch files and livereload in the browser during development
             watch: {
                 handlebars: {
@@ -104,10 +110,12 @@ var path           = require('path'),
                 }
             },
 
+            // ### Config for grunt-express-server
             // Start our server in development
             express: {
                 options: {
-                    script: 'index.js'
+                    script: 'index.js',
+                    output: 'Ghost is running'
                 },
 
                 dev: {
@@ -122,6 +130,7 @@ var path           = require('path'),
                 }
             },
 
+            // ### Config for grunt-jslint
             // JSLint all the things!
             jslint: {
                 server: {
@@ -190,6 +199,8 @@ var path           = require('path'),
                 }
             },
 
+            // ### Config for grunt-mocha-cli
+            // Run mocha unit tests
             mochacli: {
                 options: {
                     ui: 'bdd',
@@ -228,15 +239,24 @@ var path           = require('path'),
                     ]
                 },
 
+                storage: {
+                    src: ['core/test/unit/**/storage*_spec.js']
+                },
+
                 integration: {
                     src: ['core/test/integration/**/model*_spec.js']
                 },
 
                 api: {
                     src: ['core/test/functional/api/*_test.js']
+                },
+
+                routes: {
+                    src: ['core/test/functional/routes/*_test.js']
                 }
             },
 
+            // ### Config for grunt-contrib-sass
             // Compile all the SASS!
             sass: {
                 admin: {
@@ -254,10 +274,14 @@ var path           = require('path'),
                 }
             },
 
+            // ### config for grunt-shell
+            // command line tools
             shell: {
+                // install bourbon
                 bourbon: {
                     command: 'bourbon install --path <%= paths.adminAssets %>/sass/modules/'
                 },
+                // generate coverage report
                 coverage: {
                     command: function () {
                         // will work on windows only if mocha is globally installed
@@ -270,6 +294,8 @@ var path           = require('path'),
                 }
             },
 
+            // ### Config for grunt-contrib-handlebars
+            // Compile templates for admin client
             handlebars: {
                 core: {
                     options: {
@@ -285,6 +311,8 @@ var path           = require('path'),
                 }
             },
 
+            // ### Config for grunt-groc
+            // Generate documentation from code
             groc: {
                 docs: {
                     options: {
@@ -306,6 +334,8 @@ var path           = require('path'),
                 }
             },
 
+            // ### Config for grunt-contrib-clean
+            // Clean up files as part of other tasks
             clean: {
                 release: {
                     src: ['<%= paths.releaseBuild %>/**']
@@ -315,21 +345,9 @@ var path           = require('path'),
                 }
             },
 
+            // ### Config for grunt-contrib-copy
+            // Prepare files for builds / releases
             copy: {
-                nightly: {
-                    files: [{
-                        expand: true,
-                        src: buildGlob,
-                        dest: '<%= paths.nightlyBuild %>/<%= pkg.version %>/'
-                    }]
-                },
-                weekly: {
-                    files: [{
-                        expand: true,
-                        src: buildGlob,
-                        dest: '<%= paths.weeklyBuild %>/<%= pkg.version %>/'
-                    }]
-                },
                 release: {
                     files: [{
                         expand: true,
@@ -339,23 +357,9 @@ var path           = require('path'),
                 }
             },
 
+            // ### Config for grunt-contrib-compress
+            // Zip up builds / releases
             compress: {
-                nightly: {
-                    options: {
-                        archive: '<%= paths.nightlyDist %>/Ghost-Nightly-<%= pkg.version %>.zip'
-                    },
-                    expand: true,
-                    cwd: '<%= paths.nightlyBuild %>/<%= pkg.version %>/',
-                    src: ['**']
-                },
-                weekly: {
-                    options: {
-                        archive: '<%= paths.weeklyDist %>/Ghost-Weekly-<%= pkg.version %>.zip'
-                    },
-                    expand: true,
-                    cwd: '<%= paths.weeklyBuild %>/<%= pkg.version %>/',
-                    src: ['**']
-                },
                 release: {
                     options: {
                         archive: '<%= paths.releaseDist %>/Ghost-<%= pkg.version %>.zip'
@@ -366,15 +370,8 @@ var path           = require('path'),
                 }
             },
 
-            bump: {
-                options: {
-                    tagName: '%VERSION%',
-                    commitMessage: '<%= buildType %> Release %VERSION%',
-                    tagMessage: '<%= buildType %> Release %VERSION%',
-                    pushTo: 'origin build'
-                }
-            },
-
+            // ### Config for grunt-contrib-concat
+            // concatenate multiple JS files into a single file ready for use
             concat: {
                 dev: {
                     files: {
@@ -481,6 +478,8 @@ var path           = require('path'),
                 }
             },
 
+            // ### Config for grunt-contrib-uglify
+            // minify javascript file for production
             uglify: {
                 prod: {
                     files: {
@@ -492,6 +491,9 @@ var path           = require('path'),
 
         grunt.initConfig(cfg);
 
+
+        // ## Custom Tasks
+
         grunt.registerTask('setTestEnv', 'Use "testing" Ghost config; unless we are running on travis (then show queries for debugging)', function () {
             process.env.NODE_ENV = process.env.TRAVIS ? 'travis-' + process.env.DB : 'testing';
             cfg.express.test.options.node_env = process.env.NODE_ENV;
@@ -502,14 +504,6 @@ var path           = require('path'),
             config.load().then(function () {
                 done();
             });
-        });
-
-        grunt.registerTask('updateCurrentPackageInfo', 'Update the package information after changes', function () {
-            cfg.pkg = grunt.file.readJSON('package.json');
-        });
-
-        grunt.registerTask('setCurrentBuildType', function (type) {
-            cfg.buildType = type;
         });
 
         grunt.registerTask('spawn-casperjs', function () {
@@ -789,54 +783,6 @@ var path           = require('path'),
             });
         });
 
-        // ## Tools for packaging builds - these can be weeklies, nightlies or releases
-
-        /* These tools are currently unused
-        grunt.registerTask('nightly',
-            'Nightly builds\n' +
-            ' - Do our standard build steps (sass, handlebars, etc)\n' +
-            ' - Bump patch version in package.json, commit, tag and push\n' +
-            ' - Generate changelog for the past 14 releases\n' +
-            ' - Copy files to build-folder/#/#{version} directory\n' +
-            ' - Clean out unnecessary files (travis, .git*, .af*, .groc*)\n' +
-            ' - Zip files in build folder to dist-folder/#{version} directory',
-            [
-                'setCurrentBuildType:Nightly',
-                'shell:bourbon',
-                'sass:compress',
-                'handlebars',
-                'concat',
-                'uglify',
-                'bump:build',
-                'updateCurrentPackageInfo',
-                'changelog',
-                'copy:nightly',
-                'compress:nightly'
-            ]);
-
-        grunt.registerTask('weekly',
-            'Weekly builds\n' +
-            ' - Do our standard build steps (sass, handlebars, etc)\n' +
-            ' - Bump patch version in package.json, commit, tag and push\n' +
-            ' - Generate changelog for the past 14 releases\n' +
-            ' - Copy files to build-folder/#/#{version} directory\n' +
-            ' - Clean out unnecessary files (travis, .git*, .af*, .groc*)\n' +
-            ' - Zip files in build folder to dist-folder/#{version} directory',
-            [
-                'setCurrentBuildType:Weekly',
-                'shell:bourbon',
-                'sass:compress',
-                'handlebars',
-                'concat',
-                'uglify',
-                'bump:build',
-                'updateCurrentPackageInfo',
-                'changelog',
-                'copy:weekly',
-                'compress:weekly'
-            ]);
-        */
-
         grunt.registerTask('release',
             'Release task - creates a final built zip\n' +
             ' - Do our standard build steps (sass, handlebars, etc)\n' +
@@ -850,7 +796,6 @@ var path           = require('path'),
                 'handlebars',
                 'concat',
                 'uglify',
-                'changelog',
                 'clean:release',
                 'copy:release',
                 'compress:release'
@@ -866,31 +811,41 @@ var path           = require('path'),
                 'watch'
             ]);
 
+        // ### Find out more about grunt task usage
 
-        // ## Running the test suites
-
-        grunt.registerTask('test-unit', 'Run unit tests', ['clean:test', 'setTestEnv', 'loadConfig', 'mochacli:unit']);
-
-        grunt.registerTask('test-integration', 'Run integration tests', ['clean:test', 'setTestEnv', 'loadConfig', 'mochacli:integration']);
-
-        grunt.registerTask('test-functional', 'Run casperjs tests only', ['clean:test', 'setTestEnv', 'loadConfig', 'express:test', 'spawn-casperjs', 'express:test:stop']);
-
-        grunt.registerTask('test-api', 'Run functional api tests only', ['clean:test', 'setTestEnv', 'loadConfig', 'express:test', 'mochacli:api', 'express:test:stop']);
-
-        grunt.registerTask('validate', 'Run tests and lint code', ['jslint', 'test-unit', 'test-integration', 'test-api', 'test-functional']);
+        grunt.registerTask('help',
+            'Outputs help information if you type `grunt help` instead of `grunt --help`',
+            function () {
+                console.log('Type `grunt --help` to get the details of available grunt tasks, or alternatively visit https://github.com/TryGhost/Ghost/wiki/Grunt-Toolkit');
+            });
 
 
-        // ## Coverage report for Unit and Integration Tests
+        // ### Running the test suites
 
-        grunt.registerTask('test-coverage', 'Generate unit and integration tests coverage report', ['clean:test', 'setTestEnv', 'loadConfig', 'express:test', 'shell:coverage']);
+        grunt.registerTask('test-unit', 'Run unit tests (mocha)', ['clean:test', 'setTestEnv', 'loadConfig', 'mochacli:unit']);
+
+        grunt.registerTask('test-integration', 'Run integration tests (mocha + db access)', ['clean:test', 'setTestEnv', 'loadConfig', 'mochacli:integration']);
+
+        grunt.registerTask('test-functional', 'Run functional interface tests (CasperJS)', ['clean:test', 'setTestEnv', 'loadConfig', 'express:test', 'spawn-casperjs', 'express:test:stop']);
+
+        grunt.registerTask('test-api', 'Run functional api tests (mocha)', ['clean:test', 'setTestEnv', 'loadConfig', 'express:test', 'mochacli:api', 'express:test:stop']);
+
+        grunt.registerTask('test-routes', 'Run functional route tests (mocha)', ['clean:test', 'setTestEnv', 'loadConfig', 'express:test', 'mochacli:routes', 'express:test:stop']);
+
+        grunt.registerTask('validate', 'Run tests and lint code', ['jslint', 'test-routes', 'test-unit', 'test-api', 'test-integration', 'test-functional']);
 
 
-        // ## Documentation
+        // ### Coverage report for Unit and Integration Tests
+
+        grunt.registerTask('test-coverage', 'Generate unit and integration (mocha) tests coverage report', ['clean:test', 'setTestEnv', 'loadConfig', 'shell:coverage']);
+
+
+        // ### Documentation
 
         grunt.registerTask('docs', 'Generate Docs', ['groc']);
 
 
-        // ## Tools for building assets
+        // ### Tools for building assets
 
         grunt.registerTask('init', 'Prepare the project for development', ['shell:bourbon', 'default']);
 

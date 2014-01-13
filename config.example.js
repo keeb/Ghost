@@ -8,7 +8,7 @@ config = {
     // ### Development **(default)**
     development: {
         // The url to use when providing links to the site, E.g. in RSS and email.
-        url: 'http://blog.stinemat.es',
+        url: 'http://my-ghost-blog.com',
 
         // Example mail config
         // Visit http://docs.ghost.org/mail for instructions
@@ -44,7 +44,7 @@ config = {
     // When running Ghost in the wild, use the production environment
     // Configure your URL and mail settings here
     production: {
-        url: 'http://blog.stinemat.es',
+        url: 'http://my-ghost-blog.com',
         mail: {},
         database: {
             client: 'sqlite3',
@@ -81,9 +81,9 @@ config = {
     },
 
     // ### Travis
-    // Automated testing run through Github
-    travis: {
-        url: 'http://127.0.0.1:2368',
+    // Automated testing run through GitHub
+    'travis-sqlite3': {
+        url: 'http://127.0.0.1:2369',
         database: {
             client: 'sqlite3',
             connection: {

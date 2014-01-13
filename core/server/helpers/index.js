@@ -1,20 +1,26 @@
-var _               = require('underscore'),
-    moment          = require('moment'),
-    downsize        = require('downsize'),
-    path            = require('path'),
-    when            = require('when'),
+var downsize        = require('downsize'),
     hbs             = require('express-hbs'),
+    moment          = require('moment'),
+    path            = require('path'),
     polyglot        = require('node-polyglot').instance,
-    template        = require('./template'),
+    _               = require('underscore'),
+    when            = require('when'),
+
+    api             = require('../api'),
+    config          = require('../config'),
     errors          = require('../errorHandling'),
-    models          = require('../models'),
     filters         = require('../filters'),
-    packageInfo     = require('../../../package.json'),
-    version         = packageInfo.version,
-    scriptTemplate  = _.template("<script src='<%= source %>?v=<%= version %>'></script>"),
+    template        = require('./template'),
+    schema          = require('../data/schema').checks,
+
+    assetTemplate   = _.template('<%= source %>?v=<%= version %>'),
+    scriptTemplate  = _.template('<script src="<%= source %>?v=<%= version %>"></script>'),
     isProduction    = process.env.NODE_ENV === 'production',
+
     coreHelpers     = {},
     registerHelpers;
+
+
 
 /**
  * [ description]
@@ -34,6 +40,9 @@ coreHelpers.date = function (context, options) {
             context = this.published_at;
         }
     }
+
+    // ensure that context is undefined, not null, as that can cause errors
+    context = context === null ? undefined : context;
 
     var f = options.hash.format || 'MMM Do, YYYY',
         timeago = options.hash.timeago,
@@ -71,7 +80,7 @@ coreHelpers.encode = function (context, str) {
 //
 coreHelpers.pageUrl = function (context, block) {
     /*jslint unparam:true*/
-    return context === 1 ? '/' : ('/page/' + context + '/');
+    return config.paths().subdir + (context === 1 ? '/' : ('/page/' + context + '/'));
 };
 
 // ### URL helper
@@ -84,36 +93,13 @@ coreHelpers.pageUrl = function (context, block) {
 // i.e. If inside a post context will return post permalink
 // absolute flag outputs absolute URL, else URL is relative
 coreHelpers.url = function (options) {
-    var output = '',
-        self = this,
-        tags = {
-            year: function () { return self.created_at.getFullYear(); },
-            month: function () { return self.created_at.getMonth() + 1; },
-            day: function () { return self.created_at.getDate(); },
-            slug: function () { return self.slug; },
-            id: function () { return self.id; }
-        },
-        blog = coreHelpers.ghost.blogGlobals(),
-        isAbsolute = options && options.hash.absolute;
+    var absolute = options && options.hash.absolute;
 
-    if (isAbsolute) {
-        output += blog.url;
+    if (schema.isPost(this)) {
+        return config.paths.urlForPost(api.settings, this, absolute);
     }
 
-    if (blog.path && blog.path !== '/') {
-        output += blog.path;
-    }
-
-    if (models.isPost(this)) {
-        output += coreHelpers.ghost.settings('permalinks');
-        output = output.replace(/(:[a-z]+)/g, function (match) {
-            if (_.has(tags, match.substr(1))) {
-                return tags[match.substr(1)]();
-            }
-        });
-    }
-
-    return output;
+    return when(config.paths.urlFor(this, absolute));
 };
 
 // ### Asset helper
@@ -121,27 +107,33 @@ coreHelpers.url = function (options) {
 // *Usage example:*
 // `{{asset "css/screen.css"}}`
 // `{{asset "css/screen.css" ghost="true"}}`
-//
 // Returns the path to the specified asset. The ghost
 // flag outputs the asset path for the Ghost admin
 coreHelpers.asset = function (context, options) {
     var output = '',
-        subDir = coreHelpers.ghost.blogGlobals().path,
         isAdmin = options && options.hash && options.hash.ghost;
 
-    if (subDir === '/') {
-        output += '/';
-    } else {
-        output += subDir + '/';
+    output += config.paths().subdir + '/';
+
+    if (!context.match(/^favicon\.ico$/) && !context.match(/^shared/) && !context.match(/^asset/)) {
+        if (isAdmin) {
+            output += 'ghost/';
+        } else {
+            output += 'assets/';
+        }
     }
 
-    if (isAdmin) {
-        output += 'ghost/';
-    } else {
-        output += 'assets/';
-    }
-
+    // Get rid of any leading slash on the context
+    context = context.replace(/^\//, '');
     output += context;
+
+    if (!context.match(/^favicon\.ico$/)) {
+        output = assetTemplate({
+            source: output,
+            version: coreHelpers.assetHash
+        });
+    }
+
     return new hbs.handlebars.SafeString(output);
 };
 
@@ -204,7 +196,13 @@ coreHelpers.content = function (options) {
         truncateOptions[key] = parseInt(truncateOptions[key], 10);
     });
 
-    if (truncateOptions.words || truncateOptions.characters) {
+    if (truncateOptions.hasOwnProperty('words') || truncateOptions.hasOwnProperty('characters')) {
+        // Due to weirdness in downsize the 'words' option
+        // must be passed as a string. refer to #1796
+        // TODO: when downsize fixes this quirk remove this hack.
+        if (truncateOptions.hasOwnProperty('words')) {
+            truncateOptions.words = truncateOptions.words.toString();
+        }
         return new hbs.handlebars.SafeString(
             downsize(this.html, truncateOptions)
         );
@@ -257,15 +255,14 @@ coreHelpers.excerpt = function (options) {
 // Returns the config value for fileStorage.
 coreHelpers.fileStorage = function (context, options) {
     /*jslint unparam:true*/
-    if (coreHelpers.config().hasOwnProperty('fileStorage')) {
-        return coreHelpers.config().fileStorage.toString();
+    if (config().hasOwnProperty('fileStorage')) {
+        return config().fileStorage.toString();
     }
     return "true";
 };
 
 coreHelpers.ghostScriptTags = function () {
-    var scriptFiles = [],
-        blog = coreHelpers.ghost.blogGlobals();
+    var scriptFiles = [];
 
     if (isProduction) {
         scriptFiles.push("ghost.min.js");
@@ -281,8 +278,8 @@ coreHelpers.ghostScriptTags = function () {
 
     scriptFiles = _.map(scriptFiles, function (fileName) {
         return scriptTemplate({
-            source: (blog.path === '/' ? '' : blog.path) + '/built/scripts/' + fileName,
-            version: version
+            source: config.paths().subdir + '/ghost/scripts/' + fileName,
+            version: coreHelpers.assetHash
         });
     });
 
@@ -299,9 +296,9 @@ coreHelpers.body_class = function (options) {
         tags = this.post && this.post.tags ? this.post.tags : this.tags || [],
         page = this.post && this.post.page ? this.post.page : this.page || false;
 
-    if (_.isString(this.ghostRoot) && this.ghostRoot.match(/\/page/)) {
+    if (_.isString(this.relativeUrl) && this.relativeUrl.match(/\/page/)) {
         classes.push('archive-template');
-    } else if (!this.ghostRoot || this.ghostRoot === '/' || this.ghostRoot === '') {
+    } else if (!this.relativeUrl || this.relativeUrl === '/' || this.relativeUrl === '') {
         classes.push('home-template');
     } else {
         classes.push('post-template');
@@ -348,8 +345,8 @@ coreHelpers.post_class = function (options) {
 
 coreHelpers.ghost_head = function (options) {
     /*jslint unparam:true*/
-    var blog = coreHelpers.ghost.blogGlobals(),
-        root = blog.path === '/' ? '' : blog.path,
+    var self = this,
+        blog = config.theme(),
         head = [],
         majorMinor = /^(\d+\.)?(\d+)/,
         trimmedVersion = this.version;
@@ -358,12 +355,14 @@ coreHelpers.ghost_head = function (options) {
 
     head.push('<meta name="generator" content="Ghost ' + trimmedVersion + '" />');
 
-    head.push('<link rel="alternate" type="application/rss+xml" title="' + _.escape(blog.title)  + '" href="' + root + '/rss/' + '">');
-    if (this.ghostRoot) {
-        head.push('<link rel="canonical" href="' + coreHelpers.ghost.blogGlobals().url + this.ghostRoot + '" />');
-    }
+    head.push('<link rel="alternate" type="application/rss+xml" title="'
+        + _.escape(blog.title)  + '" href="' + config.paths.urlFor('rss') + '">');
 
-    return filters.doFilter('ghost_head', head).then(function (head) {
+    return coreHelpers.url.call(self, {hash: {absolute: true}}).then(function (url) {
+        head.push('<link rel="canonical" href="' + url + '" />');
+
+        return filters.doFilter('ghost_head', head);
+    }).then(function (head) {
         var headString = _.reduce(head, function (memo, item) { return memo + '\n' + item; }, '');
         return new hbs.handlebars.SafeString(headString.trim());
     });
@@ -372,7 +371,11 @@ coreHelpers.ghost_head = function (options) {
 coreHelpers.ghost_foot = function (options) {
     /*jslint unparam:true*/
     var foot = [];
-    foot.push('<script src="' + coreHelpers.ghost.blogGlobals().url + '/shared/vendor/jquery/jquery.js"></script>');
+
+    foot.push(scriptTemplate({
+        source: config.paths().subdir + '/shared/vendor/jquery/jquery.js',
+        version: coreHelpers.assetHash
+    }));
 
     return filters.doFilter('ghost_foot', foot).then(function (foot) {
         var footString = _.reduce(foot, function (memo, item) { return memo + ' ' + item; }, '');
@@ -384,9 +387,10 @@ coreHelpers.meta_title = function (options) {
     /*jslint unparam:true*/
     var title,
         blog;
-    if (_.isString(this.ghostRoot)) {
-        if (!this.ghostRoot || this.ghostRoot === '/' || this.ghostRoot === '' || this.ghostRoot.match(/\/page/)) {
-            blog = coreHelpers.ghost.blogGlobals();
+
+    if (_.isString(this.relativeUrl)) {
+        if (!this.relativeUrl || this.relativeUrl === '/' || this.relativeUrl === '' || this.relativeUrl.match(/\/page/)) {
+            blog = config.theme();
             title = blog.title;
         } else {
             title = this.post.title;
@@ -404,9 +408,9 @@ coreHelpers.meta_description = function (options) {
     var description,
         blog;
 
-    if (_.isString(this.ghostRoot)) {
-        if (!this.ghostRoot || this.ghostRoot === '/' || this.ghostRoot === '' || this.ghostRoot.match(/\/page/)) {
-            blog = coreHelpers.ghost.blogGlobals();
+    if (_.isString(this.relativeUrl)) {
+        if (!this.relativeUrl || this.relativeUrl === '/' || this.relativeUrl === '' || this.relativeUrl.match(/\/page/)) {
+            blog = config.theme();
             description = blog.description;
         } else {
             description = '';
@@ -429,19 +433,19 @@ coreHelpers.meta_description = function (options) {
  */
 coreHelpers.e = function (key, defaultString, options) {
     var output;
-
-    if (coreHelpers.ghost.settings('defaultLang') === 'en' && _.isEmpty(options.hash) && !coreHelpers.ghost.settings('forceI18n')) {
-        output = defaultString;
-    } else {
-        output = polyglot().t(key, options.hash);
-    }
-
-    return output;
-};
-
-coreHelpers.json = function (object, options) {
-    /*jslint unparam:true*/
-    return JSON.stringify(object);
+    when.all([
+        api.settings.read('defaultLang'),
+        api.settings.read('forceI18n')
+    ]).then(function (values) {
+        if (values[0].value === 'en'
+                && _.isEmpty(options.hash)
+                && _.isEmpty(values[1].value)) {
+            output = defaultString;
+        } else {
+            output = polyglot().t(key, options.hash);
+        }
+        return output;
+    });
 };
 
 coreHelpers.foreach = function (context, options) {
@@ -514,28 +518,6 @@ coreHelpers.foreach = function (context, options) {
     return ret;
 };
 
-// ### Check if a tag is contained on the tag list
-//
-// Usage example:*
-//
-// `{{#has_tag "test"}} {{tags}} {{else}} no tags {{/has_tag}}`
-//
-// @param  {String} tag name to search on tag list
-// @return {String} list of tags formatted according to `tag` helper
-//
-coreHelpers.has_tag = function (name, options) {
-    if (_.isArray(this.tags) && !_.isEmpty(this.tags)) {
-        return (!_.isEmpty(_.filter(this.tags, function (tag) {
-            return (_.has(tag, "name") && tag.name === name);
-        }))) ? options.fn(this) : options.inverse(this);
-    }
-    return options.inverse(this);
-};
-
-// ## Template driven helpers
-// Template driven helpers require that their template is loaded before they can be registered.
-coreHelpers.paginationTemplate = null;
-
 // ### Pagination Helper
 // `{{pagination}}`
 // Outputs previous and next buttons, along with info about the current page
@@ -560,7 +542,7 @@ coreHelpers.pagination = function (options) {
         errors.logAndThrowError('Invalid value, check page, pages, limit and total are numbers');
         return;
     }
-    return new hbs.handlebars.SafeString(coreHelpers.paginationTemplate(this.pagination));
+    return template.execute('pagination', this.pagination);
 };
 
 coreHelpers.helperMissing = function (arg) {
@@ -570,13 +552,36 @@ coreHelpers.helperMissing = function (arg) {
     errors.logError('Missing helper: "' + arg + '"');
 };
 
-// Register a handlebars helper for themes
-function registerThemeHelper(name, fn) {
-    hbs.registerHelper(name, fn);
-}
+// ## Admin URL helper
+// uses urlFor to generate a URL for either the admin or the frontend.
+coreHelpers.adminUrl = function (options) {
+    var absolute = options && options.hash && options.hash.absolute,
+        // Ghost isn't a named route as currently it violates the must start-and-end with slash rule
+        context = !options || !options.hash || !options.hash.frontend ? {relativeUrl: '/ghost'} : 'home';
 
-// Register an async handlebars helper for themes
-function registerAsyncThemeHelper(name, fn) {
+    return config.paths.urlFor(context, absolute);
+};
+
+coreHelpers.updateNotification = function () {
+    var output = '';
+
+    if (config().updateCheck === false || !this.currentUser) {
+        return when(output);
+    }
+
+    return api.settings.read('displayUpdateNotification').then(function (display) {
+        if (display && display.value && display.value === 'true') {
+            output = '<div class="notification-success">' +
+                'A new version of Ghost is available! Hot damn. ' +
+                '<a href="http://ghost.org/download">Upgrade now</a></div>';
+        }
+
+        return output;
+    });
+};
+
+// Register an async handlebars helper for a given handlebars instance
+function registerAsyncHelper(hbs, name, fn) {
     hbs.registerAsyncHelper(name, function (options, cb) {
         // Wrap the function passed in with a when.resolve so it can
         // return either a promise or a value
@@ -588,15 +593,37 @@ function registerAsyncThemeHelper(name, fn) {
     });
 }
 
-registerHelpers = function (ghost, config) {
-    var paginationHelper;
+// Register a handlebars helper for themes
+function registerThemeHelper(name, fn) {
+    hbs.registerHelper(name, fn);
+}
 
-    // Expose this so our helpers can use it in their code.
-    coreHelpers.ghost = ghost;
+// Register an async handlebars helper for themes
+function registerAsyncThemeHelper(name, fn) {
+    registerAsyncHelper(hbs, name, fn);
+}
 
-    // And expose config
-    coreHelpers.config = config;
+// Register a handlebars helper for admin
+function registerAdminHelper(name, fn) {
+    coreHelpers.adminHbs.registerHelper(name, fn);
+}
 
+// Register an async handlebars helper for admin
+function registerAsyncAdminHelper(name, fn) {
+    registerAsyncHelper(coreHelpers.adminHbs, name, fn);
+}
+
+
+registerHelpers = function (adminHbs, assetHash) {
+
+    // Expose hbs instance for admin
+    coreHelpers.adminHbs = adminHbs;
+
+    // Store hash for assets
+    coreHelpers.assetHash = assetHash;
+
+
+    // Register theme helpers
     registerThemeHelper('asset', coreHelpers.asset);
 
     registerThemeHelper('author', coreHelpers.author);
@@ -605,31 +632,21 @@ registerHelpers = function (ghost, config) {
 
     registerThemeHelper('date', coreHelpers.date);
 
-    registerThemeHelper('e', coreHelpers.e);
-
     registerThemeHelper('encode', coreHelpers.encode);
 
     registerThemeHelper('excerpt', coreHelpers.excerpt);
 
-    registerThemeHelper('fileStorage', coreHelpers.fileStorage);
-
     registerThemeHelper('foreach', coreHelpers.foreach);
-
-    registerThemeHelper('ghostScriptTags', coreHelpers.ghostScriptTags);
-
-    registerThemeHelper('has_tag', coreHelpers.has_tag);
-
-    registerThemeHelper('helperMissing', coreHelpers.helperMissing);
-
-    registerThemeHelper('json', coreHelpers.json);
 
     registerThemeHelper('pageUrl', coreHelpers.pageUrl);
 
+    registerThemeHelper('pagination', coreHelpers.pagination);
+
     registerThemeHelper('tags', coreHelpers.tags);
 
-    registerThemeHelper('url', coreHelpers.url);
-
     registerAsyncThemeHelper('body_class', coreHelpers.body_class);
+
+    registerAsyncThemeHelper('e', coreHelpers.e);
 
     registerAsyncThemeHelper('ghost_foot', coreHelpers.ghost_foot);
 
@@ -641,16 +658,19 @@ registerHelpers = function (ghost, config) {
 
     registerAsyncThemeHelper('post_class', coreHelpers.post_class);
 
-    paginationHelper = template.loadTemplate('pagination').then(function (templateFn) {
-        coreHelpers.paginationTemplate = templateFn;
+    registerAsyncThemeHelper('url', coreHelpers.url);
 
-        registerThemeHelper('pagination', coreHelpers.pagination);
-    });
 
-    // Return once the template-driven helpers have loaded
-    return when.join(
-        paginationHelper
-    );
+    // Register admin helpers
+    registerAdminHelper('asset', coreHelpers.asset);
+
+    registerAdminHelper('ghostScriptTags', coreHelpers.ghostScriptTags);
+
+    registerAdminHelper('fileStorage', coreHelpers.fileStorage);
+
+    registerAdminHelper('adminUrl', coreHelpers.adminUrl);
+
+    registerAsyncAdminHelper('updateNotification', coreHelpers.updateNotification);
 };
 
 module.exports = coreHelpers;

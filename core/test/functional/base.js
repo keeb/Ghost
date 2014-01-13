@@ -21,7 +21,8 @@
  * you must have phantomjs 1.9.1 and casperjs 1.1.0-DEV installed in order for these tests to work
  */
 
-var host = casper.cli.options.host || 'localhost',
+var DEBUG = false, // TOGGLE THIS TO GET MORE SCREENSHOTS
+    host = casper.cli.options.host || 'localhost',
     noPort = casper.cli.options.noPort || false,
     port = casper.cli.options.port || '2368',
     email = casper.cli.options.email || 'jbloggs@example.com',
@@ -58,10 +59,17 @@ casper.writeContentToCodeMirror = function (content) {
 
 casper.waitForOpaque = function (classname, then, timeout) {
     casper.waitFor(function checkOpaque() {
-        return this.evaluate(function (element) {
+        var value = this.evaluate(function (element) {
             var target = document.querySelector(element);
+            if (target === null) {
+                return null;
+            }
             return window.getComputedStyle(target).getPropertyValue('opacity') === "1";
         }, classname);
+        if (value !== true && value !== false) {
+            casper.test.fail('Unable to find element: ' + classname);
+        }
+        return value;
     }, then, timeout);
 };
 
@@ -79,10 +87,20 @@ casper.on("page.error", function (msg) {
     this.echo("GOT PAGE ERROR: " + msg, "ERROR");
 });
 
+casper.captureScreenshot = function (filename, debugOnly) {
+    debugOnly = debugOnly !== false;
+    // If we are in debug mode, OR debugOnly is false
+    if (DEBUG || debugOnly === false) {
+        filename = filename || "casper_test_fail.png";
+        casper.then(function () {
+            casper.capture(new Date().getTime() + '_' + filename);
+        });
+    }
+};
+
 // on failure, grab a screenshot
 casper.test.on("fail", function captureFailure() {
-    var filename = casper.test.filename || "casper_test_fail.png";
-    casper.capture(new Date().getTime() + '_' + filename);
+    casper.captureScreenshot(casper.test.filename || "casper_test_fail.png", false);
 });
 
 var CasperTest = (function () {
@@ -98,6 +116,8 @@ var CasperTest = (function () {
         casper.thenOpen(url + 'ghost\/signout/');
 
         casper.waitForResource(/ghost\/sign/);
+
+        casper.captureScreenshot('teardown.png');
 
         casper.run(done);
     });
@@ -181,25 +201,49 @@ CasperTest.Routines = (function () {
     function login(test) {
         casper.thenOpen(url + 'ghost/signin/');
 
+        casper.waitForResource(/ghost\/signin/);
+
         casper.waitForOpaque('.login-box', function then() {
+            casper.captureScreenshot("got_sign_in.png");
             this.fill("#login", user, true);
+            casper.captureScreenshot("filled_sign_in.png");
         });
 
-        casper.waitForResource(/ghost\/$/);
+        casper.waitForResource(/ghost\/$/).then(function () {
+            casper.captureScreenshot('have_logged_in.png');
+        });
     }
 
     function logout(test) {
         casper.thenOpen(url + 'ghost\/signout/');
+
+        casper.captureScreenshot("logging_out.png");
+
         // Wait for signin or signup
         casper.waitForResource(/ghost\/sign/);
     }
 
-    function deletePost(id) {
-        casper.thenOpen(url + 'ghost/');
+    function togglePermalinks(state) {
+        casper.thenOpen(url + "ghost/settings/general");
 
-        casper.thenEvaluate(function (id) {
-            return __utils__.sendAJAX(Ghost.settings.apiRoot + '/posts/' + id, 'DELETE');
-        }, id);
+        casper.waitForResource(/ghost\/settings\/general/);
+
+        casper.waitForSelector('#general');
+        casper.waitForOpaque('#general', function then() {
+            var currentState = this.evaluate(function () {
+                return document.querySelector('#permalinks') && document.querySelector('#permalinks').checked ? 'on' : 'off';
+            });
+            if (currentState !== state) {
+                casper.thenClick('#permalinks');
+                casper.thenClick('.button-save');
+
+                casper.captureScreenshot("saving.png");
+
+                casper.waitForSelector('.notification-success', function () {
+                    casper.captureScreenshot("saved.png");
+                });
+            }
+        });
     }
 
     function _createRunner(fn) {
@@ -218,7 +262,7 @@ CasperTest.Routines = (function () {
         register: _createRunner(register),
         login: _createRunner(login),
         logout: _createRunner(logout),
-        deletePost: _createRunner(deletePost)
+        togglePermalinks: _createRunner(togglePermalinks)
     };
 
 }());

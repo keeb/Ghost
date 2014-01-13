@@ -27,6 +27,7 @@
                     $dropzone.find('.fileupload-loading').remove();
                     $dropzone.css({"height": "auto"});
                     $dropzone.delay(250).animate({opacity: 100}, 1000, function () {
+                        $('.js-button-accept').prop('disabled', false);
                         self.init();
                     });
                 }
@@ -47,7 +48,7 @@
                         .attr({'src': '', "width": 'auto', "height": 'auto'});
 
                     $progress.animate({"opacity": 0}, 250, function () {
-                        $dropzone.find('span.media').after('<img class="fileupload-loading"  src="' + Ghost.paths.ghostRoot + '/ghost/img/loadingcat.gif" />');
+                        $dropzone.find('span.media').after('<img class="fileupload-loading"  src="' + Ghost.paths.subdir + '/ghost/img/loadingcat.gif" />');
                         if (!settings.editor) {$progress.find('.fileupload-loading').css({"top": "56px"}); }
                     });
                     $dropzone.trigger("uploadsuccess", [result]);
@@ -62,12 +63,13 @@
                 var self = this;
 
                 $dropzone.find('.js-fileupload').fileupload().fileupload("option", {
-                    url: Ghost.paths.ghostRoot + '/ghost/upload/',
+                    url: Ghost.paths.subdir + '/ghost/upload/',
                     headers: {
                         'X-CSRF-Token': $("meta[name='csrf-param']").attr('content')
                     },
                     add: function (e, data) {
                         /*jslint unparam:true*/
+                        $('.js-button-accept').prop('disabled', true);
                         $dropzone.find('.js-fileupload').removeClass('right');
                         $dropzone.find('.js-url').remove();
                         $progress.find('.js-upload-progress-bar').removeClass('fail');
@@ -94,6 +96,7 @@
                     },
                     fail: function (e, data) {
                         /*jslint unparam:true*/
+                        $('.js-button-accept').prop('disabled', false);
                         $dropzone.trigger("uploadfailure", [data.result]);
                         $dropzone.find('.js-upload-progress-bar').addClass('fail');
                         if (data.jqXHR.status === 413) {
@@ -193,7 +196,10 @@
                     }
                 });
 
-                $dropzone.append('<a class="image-upload" title="Add image"><span class="hidden">Upload</span></a>');
+                // Only show the toggle icon if there is a dropzone mode to go back to
+                if (settings.fileStorage !== false) {
+                    $dropzone.append('<a class="image-upload" title="Add image"><span class="hidden">Upload</span></a>');
+                }
 
                 $dropzone.find('a.image-upload').on('click', function () {
                     $dropzone.find('.js-url').remove();
@@ -226,7 +232,7 @@
                     // This ensures there is an image we can hook into to display uploaded image
                     $dropzone.prepend('<img class="js-upload-target" style="display: none"  src="" />');
                 }
-
+                $('.js-button-accept').prop('disabled', false);
                 if ($dropzone.find('img.js-upload-target').attr('src') === '') {
                     this.initWithDropzone();
                 } else {
